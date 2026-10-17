@@ -41,7 +41,20 @@ button on the clicker, and ClickerBridge stores exactly what the device sent (a 
 Windows, the raw HID report on macOS, the evdev key code on Linux). Media keys and odd
 vendor reports work as well as Page Up/Down.
 
-## Install
+## Download a ready-made build
+
+Every version tag produces a GitHub Release with `ClickerBridge-windows-x64.exe` and
+`ClickerBridge-macos-arm64.zip` (Apple Silicon) on the repository's **Releases** page. They
+contain Python and everything else, so nothing needs installing except the Interception
+driver on Windows (see below).
+
+* **Windows**: run the `.exe`. SmartScreen may warn because it is not code-signed: click
+  *More info* → *Run anyway*.
+* **macOS**: unzip, drag `ClickerBridge.app` to Applications. It is not notarized, so the
+  first time right-click → *Open* (or run `xattr -d com.apple.quarantine /Applications/ClickerBridge.app`),
+  then allow Input Monitoring when macOS asks.
+
+## Install from source
 
 Python 3.10 or newer with tkinter (the python.org installers include it; on Homebrew use
 `brew install python-tk`; on Debian/Ubuntu `sudo apt install python3-tk`).
@@ -177,18 +190,40 @@ Applications, add that to Login Items and grant Input Monitoring to it when macO
 **Linux**: create `~/.config/autostart/clickerbridge.desktop` with
 `Exec=/path/to/clickerbridge/.venv/bin/python /path/to/clickerbridge/clickerbridge.py --minimized`.
 
-## Packaging as a standalone app (optional)
+## Building the standalone app
+
+`clickerbridge.spec` is the PyInstaller recipe for all three platforms:
 
 ```bash
 pip install pyinstaller
-# Windows (keeps interception.dll next to the exe):
-pyinstaller --noconfirm --windowed --name ClickerBridge --add-data "vendor;vendor" clickerbridge.py
-# macOS:
-pyinstaller --noconfirm --windowed --name ClickerBridge clickerbridge.py
+pyinstaller --noconfirm clickerbridge.spec
 ```
 
-The result is in `dist/`. On macOS grant Input Monitoring to `ClickerBridge.app` instead of
-Terminal.
+Windows gives `dist/ClickerBridge.exe` (single file, `interception.dll` inside), macOS gives
+`dist/ClickerBridge.app` (grant Input Monitoring to it instead of Terminal), Linux a single
+`dist/ClickerBridge` binary.
+
+### Releases on GitHub (automatic builds)
+
+`.github/workflows/release.yml` builds the Windows and macOS downloads on GitHub's runners
+and attaches them to a Release. It is deliberately **not** triggered by commits: it runs
+only when you push a version tag, or when you press *Run workflow* on the Actions tab.
+
+```bash
+# 1. bump __version__ in cb/__init__.py and commit
+# 2. tag and push the tag
+git tag v1.0.0
+git push origin main --tags
+```
+
+A few minutes later the release `v1.0.0` appears with both files. Pushing commits to `main`
+without a tag builds nothing, so the workflow cannot spam runs.
+
+About minutes: on a **public** repository GitHub-hosted runners are free. On a **private**
+repository every run draws on the plan's monthly allowance (2,000 minutes on the Free
+plan), and macOS minutes count 10× while Windows minutes count 2×; one release takes about
+4 minutes on each runner, so roughly 50 allowance-minutes per tag. Usage is visible under
+Settings → Billing and plans → Usage.
 
 ## Tests
 

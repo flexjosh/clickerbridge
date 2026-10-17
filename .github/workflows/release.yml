@@ -1,0 +1,98 @@
+# Builds the Windows .exe and the macOS .app with PyInstaller and attaches them to a GitHub Release.
+#
+# It does NOT run on ordinary commits. It runs only when:
+#   * you push a version tag, e.g.   git tag v1.0.0 && git push origin v1.0.0   -> builds + creates the release
+#   * you press "Run workflow" on the Actions tab (workflow_dispatch)           -> builds only, files appear as
+#     downloadable artifacts on that run's page, no release is created
+#
+# Minutes: public repositories get GitHub-hosted runners for free. Private repositories draw on the
+# monthly free allowance (2,000 min on the Free plan), where macOS minutes count 10x and Windows 2x,
+# so one release (~4 min on each runner) costs roughly 50 minutes of allowance.
+name: Release builds
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: windows-x64
+            artifact: ClickerBridge-windows-x64.exe
+          - os: macos-latest        # Apple Silicon runner (macOS 14+); add macos-13 for Intel builds
+            label: macos-arm64
+            artifact: ClickerBridge-macos-arm64.zip
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt "pyinstaller>=6.3"
+
+      - name: Run tests
+        run: python -m unittest discover -s tests
+
+      - name: Build with PyInstaller
+        run: pyinstaller --noconfirm clickerbridge.spec
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: mv dist/ClickerBridge.exe "${{ matrix.artifact }}"
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: ditto -c -k --keepParent dist/ClickerBridge.app "${{ matrix.artifact }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+
+      - name: List assets
+        run: ls -la assets
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: assets/*
+          generate_release_notes: true
+          body: |
+            Downloads:
+            * **Windows**: `ClickerBridge-windows-x64.exe` (needs the Interception driver installed once, see README).
+              SmartScreen may warn because the file is not code-signed: click "More info" → "Run anyway".
+            * **macOS (Apple Silicon)**: `ClickerBridge-macos-arm64.zip` - unzip, move ClickerBridge.app to Applications.
+              The app is not notarized, so the first time right-click it → Open (or run
+              `xattr -d com.apple.quarantine /Applications/ClickerBridge.app`), then allow Input Monitoring when asked.
