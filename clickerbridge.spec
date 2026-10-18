@@ -64,6 +64,7 @@ if sys.platform == "darwin":
             "CFBundleVersion": __version__,
             "LSMinimumSystemVersion": "11.0",
             "NSHighResolutionCapable": True,
+            "NSRequiresAquaSystemAppearance": True,  # always light: the UI uses fixed light colours
             "NSHumanReadableCopyright": "ClickerBridge",
         },
     )
