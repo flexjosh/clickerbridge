@@ -31,8 +31,6 @@ def config_dir() -> Path:
 
 DEFAULTS = {
     "openlp": {"host": "127.0.0.1", "port": 4316, "username": "", "password": ""},
-    "hotkey": "<ctrl>+<alt>+k",
-    "hotkey_enabled": True,
     "enable_on_launch": False,
     "show_all_devices": False,
     # One section per platform so the same settings file can travel between machines.

@@ -1,6 +1,3 @@
 # Capture backends (pip picks the right one for your OS)
 hidapi>=0.14 ; sys_platform != "linux"
 evdev>=1.6 ; sys_platform == "linux"
-
-# Optional: global keyboard shortcut (Ctrl+Alt+K by default) to toggle the bridge
-pynput>=1.7

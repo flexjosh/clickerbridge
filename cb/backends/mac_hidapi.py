@@ -11,6 +11,7 @@ clicked, or the .app bundle when packaged with PyInstaller/py2app.
 from __future__ import annotations
 
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 from .base import Backend, CaptureError, DeviceInfo
 
@@ -51,6 +52,9 @@ class HidapiBackend(Backend):
         self._threads = []
         self._stop = threading.Event()
         self._on_event = None
+        # hid.enumerate() spins the calling thread's run loop; on the Tk thread that re-enters Tk
+        # and aborts Python. So it always runs on this one thread (hidapi binds to its first caller).
+        self._hid_thread = ThreadPoolExecutor(max_workers=1)
 
     def permission_hint(self) -> str:
         return ("macOS needs the Input Monitoring permission for the program running ClickerBridge "
@@ -61,7 +65,7 @@ class HidapiBackend(Backend):
     # ---- enumeration ------------------------------------------------------
     def _interfaces(self):
         try:
-            entries = hid.enumerate()
+            entries = self._hid_thread.submit(hid.enumerate).result()
         except Exception as exc:  # hidapi raises plain Exception/IOError
             raise CaptureError(f"hidapi could not enumerate devices: {exc}") from exc
         return [d for d in entries if _usage(d) in KEYBOARD_USAGES or _usage(d) in POINTER_USAGES]

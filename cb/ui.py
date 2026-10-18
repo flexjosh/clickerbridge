@@ -103,7 +103,6 @@ class App:
         self.devices: list[DeviceInfo] = []
         self.backend_error = ""
         self.openlp_ok: bool | None = None
-        self._hotkeys = None
         self._flash_tokens: dict[str, object] = {}
         self._help_window = None
         self._auto_pending = False
@@ -118,7 +117,6 @@ class App:
         self._refresh_devices(initial=True)
         self._refresh_mappings()
         self._refresh_state()
-        self._start_hotkey()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.root.after(30, self._poll)
         if self.settings.data.get("enable_on_launch") and self.settings.device_id:
@@ -398,8 +396,6 @@ class App:
             title, sub = "BRIDGE IS OFF", "teach the buttons in Step 2 first, then click here"
         else:
             title, sub = "BRIDGE IS OFF", "click to turn on"
-        if self._hotkeys is not None:
-            sub += f"   ·   shortcut {self._hotkey_text()}"
         c.create_text(w / 2, h / 2 - 13, text=title, fill="white", font=("TkDefaultFont", 20, "bold"))
         c.create_text(w / 2, h / 2 + 18, text=sub, fill="white", font=("TkDefaultFont", 11))
 
@@ -587,8 +583,6 @@ class App:
                 self._log(str(exc))
             self._refresh_state()
             self._refresh_mappings()
-        elif kind == "hotkey":
-            self._toggle()
         elif kind == "state":
             self._refresh_state()
         elif kind == "log":
@@ -618,40 +612,10 @@ class App:
         elif kind == "mappings":
             self._refresh_mappings()
 
-    # ---- global shortcut (optional, needs pynput) -------------------------
-    def _hotkey_text(self) -> str:
-        text = (self.settings.data.get("hotkey") or "").replace("<", "").replace(">", "")
-        if sys.platform == "darwin":
-            text = text.replace("cmd", "⌘")
-        return text
-
-    def _start_hotkey(self):
-        combo = self.settings.data.get("hotkey")
-        if not combo or not self.settings.data.get("hotkey_enabled", True):
-            return
-        try:
-            from pynput import keyboard
-        except Exception:
-            self._log("Keyboard shortcut not available (the optional 'pynput' package is not installed).")
-            return
-        try:
-            self._hotkeys = keyboard.GlobalHotKeys({combo: lambda: self.core.post("hotkey")})
-            self._hotkeys.daemon = True
-            self._hotkeys.start()
-            self._log(f"Shortcut {self._hotkey_text()} turns the bridge on/off from any window.")
-        except Exception as exc:
-            self._hotkeys = None
-            self._log(f"Keyboard shortcut not registered: {exc}")
-
     # ---- shutdown ---------------------------------------------------------
     def on_close(self):
         try:
             self._apply_openlp()
-            if self._hotkeys is not None:
-                try:
-                    self._hotkeys.stop()
-                except Exception:
-                    pass
             self.core.shutdown()
             self.settings.save()
         finally:

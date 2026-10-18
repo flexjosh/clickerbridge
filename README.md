@@ -68,8 +68,7 @@ pip install -r requirements.txt
 python clickerbridge.py
 ```
 
-`requirements.txt` installs `hidapi` on Windows/macOS, `evdev` on Linux and `pynput` for the
-optional global shortcut. Everything else is the standard library.
+`requirements.txt` installs `hidapi` on Windows/macOS, `evdev` on Linux. Everything else is the standard library.
 
 ### Windows
 
@@ -108,10 +107,7 @@ optional global shortcut. Everything else is the standard library.
 4. **The big button** turns the bridge on and off. On: every clicker press is swallowed,
    mapped ones are sent to OpenLP and the matching badge flashes green (red if OpenLP
    rejected the call; the log says why). Off: the clicker is released and works normally.
-5. **Global shortcut**: with `pynput` installed, `Ctrl+Alt+K` toggles the bridge from any
-   application. Change or disable it in the settings file (`hotkey`, `hotkey_enabled`).
-   On macOS the shortcut needs the same Input Monitoring permission.
-6. Clicking a badge sends that command by hand, which is handy to check the OpenLP side
+5. Clicking a badge sends that command by hand, which is handy to check the OpenLP side
    without the clicker.
 
 OpenLP calls used: `POST /api/v2/controller/progress {"action":"next"|"previous"}` for the
@@ -130,8 +126,7 @@ opposite of what you expect: press again, or click *Reset*.
 
 Device and button mappings are stored per platform (`platforms.win32`, `platforms.darwin`,
 `platforms.linux`) because each OS identifies buttons differently, so one file can move
-between machines. Other keys: `openlp.{host,port,username,password}`, `hotkey` (pynput
-syntax, e.g. `<ctrl>+<alt>+k` or `<f13>`), `hotkey_enabled`, `enable_on_launch`
+between machines. Other keys: `openlp.{host,port,username,password}`, `enable_on_launch`
 (turn the bridge on as soon as the app starts), `show_all_devices`.
 
 `python clickerbridge.py --settings other.json` uses a different file;
@@ -251,4 +246,4 @@ tests/test_core.py          unit tests
 ```
 
 Third-party components: Interception by Francisco Lopes (driver free for non-commercial use,
-see the licences in its download), hidapi, python-evdev, pynput.
+see the licences in its download), hidapi, python-evdev.
