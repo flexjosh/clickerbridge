@@ -33,7 +33,7 @@ Log                            10:41:02  OK: Next slide (12 ms)
 | OS | Backend | What it does | One-time setup |
 |----|---------|--------------|----------------|
 | Windows | [Interception](https://github.com/oblitum/Interception) kernel driver (what the original C++ version used) | Filters only the keyboard device whose hardware ID you picked; its strokes are consumed instead of forwarded | Install the driver once (admin) and reboot. `interception.dll` is bundled in `vendor/` |
-| macOS | `hidapi` (IOKit exclusive open, `kIOHIDOptionsTypeSeizeDevice`) | Opens the clicker's keyboard/consumer-control HID interfaces exclusively; macOS stops seeing them | Grant **Input Monitoring** to the program that runs ClickerBridge |
+| macOS | `hidapi` (shared IOKit open) + a `CGEventTap` | Reads the clicker's HID reports; the event tap drops key events that arrive while the clicker is sending (macOS only lets root open a keyboard exclusively). Untick *Block the clicker's keys* for shared mode | Grant **Input Monitoring** and **Accessibility** to the program that runs ClickerBridge |
 | Linux | `evdev` (`EVIOCGRAB`) | Grabs the clicker's `/dev/input/event*` node(s) exclusively | Read access to `/dev/input` (the `input` group) |
 
 Button identity is learned, not assumed: you press *Capture forward click* and then the
@@ -52,7 +52,8 @@ driver on Windows (see below).
   *More info* → *Run anyway*.
 * **macOS**: unzip, drag `ClickerBridge.app` to Applications. It is not notarized, so the
   first time right-click → *Open* (or run `xattr -d com.apple.quarantine /Applications/ClickerBridge.app`),
-  then allow Input Monitoring when macOS asks.
+  then allow Input Monitoring when macOS asks, and add ClickerBridge under
+  Privacy & Security → **Accessibility** (needed to block the clicker's keys in other apps).
 
 ## Install from source
 
@@ -85,6 +86,7 @@ python clickerbridge.py
    **Input Monitoring** for the app that launched Python: *Terminal* or *iTerm*, or
    *ClickerBridge.app* if you packaged it (see below). Allow it, quit ClickerBridge and start
    it again. You can check later under System Settings → Privacy & Security → Input Monitoring.
+   Blocking the clicker's keys in other apps also needs **Accessibility** for the same app.
 3. The dropdown hides Apple's built-in keyboard and trackpad (vendor 05AC) unless you tick
    *Show all devices*. Never capture the built-in keyboard: you would lock yourself out
    until you click the big button with the mouse.
@@ -137,9 +139,10 @@ between machines. Other keys: `openlp.{host,port,username,password}`, `enable_on
 * **"The Interception driver is not installed"** (Windows): run the installer as
   Administrator and reboot. Both `keyboard.sys` and `mouse.sys` must be present in
   `C:\Windows\System32\drivers`.
-* **"Could not open the clicker exclusively"** (macOS): Input Monitoring is missing for the
+* **"Could not open the clicker"** (macOS): Input Monitoring is missing for the
   launching app, or another tool (Karabiner-Elements, Hammerspoon) already holds the device.
-  Grant the permission, quit and relaunch.
+  Grant the permission, quit and relaunch. These permissions are tied to the exact build, so
+  after updating remove ClickerBridge from the list with **–** and add it again.
 * **The clicker is not in the list**: it must present itself as a keyboard, keypad or
   consumer-control device (presenters always do). Plug it in, then *Refresh*. Devices that
   are only a mouse/pointer are not listed because they cannot be clickers.
@@ -239,7 +242,7 @@ cb/bridge.py                core: capture lifecycle, learn mode, held-key tracki
 cb/ui.py                    tkinter window
 cb/backends/base.py         DeviceInfo, Backend interface, signature names
 cb/backends/win_interception.py   Windows: Interception driver via ctypes
-cb/backends/mac_hidapi.py         macOS: exclusive HID open via hidapi
+cb/backends/mac_hidapi.py         macOS: shared HID open via hidapi + key-blocking event tap
 cb/backends/linux_evdev.py        Linux: evdev grab
 vendor/interception/        interception.dll (x64, x86) + header from the Interception download
 tests/test_core.py          unit tests

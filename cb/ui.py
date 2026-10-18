@@ -275,6 +275,12 @@ class App:
         ttk.Checkbutton(box, text="Turn the bridge on automatically whenever this app starts "
                                   "(tick this if ClickerBridge runs as a startup program)",
                         variable=self.auto_on_var, command=self._toggle_auto_on).pack(anchor="w", pady=(0, 4))
+        self.block_keys_var = tk.BooleanVar(value=bool(self.settings.data.get("block_keys", True)))
+        self.core.backend.block_keys = self.block_keys_var.get()
+        if sys.platform == "darwin":
+            ttk.Checkbutton(box, text="Block the clicker's keys in other apps (needs the Accessibility permission; "
+                                      "untick for shared mode, where other apps get them too)",
+                            variable=self.block_keys_var, command=self._toggle_block_keys).pack(anchor="w", pady=(0, 4))
 
         # Check: test panel --------------------------------------------------
         box = ttk.LabelFrame(outer, text="Check that it works", padding=8)
@@ -502,6 +508,14 @@ class App:
         self.settings.save()
         self._log("The bridge will turn on automatically when the app starts."
                   if self.auto_on_var.get() else "Automatic start switched off.")
+
+    def _toggle_block_keys(self):
+        self.settings.data["block_keys"] = self.core.backend.block_keys = bool(self.block_keys_var.get())
+        self.settings.save()
+        self._log("Blocking the clicker's keys in other apps." if self.block_keys_var.get()
+                  else "Shared mode: other apps get the clicker's keys too.")
+        if self.core.backend.is_running():
+            self._log("Turn the bridge off and on again to apply this.")
 
     def _send_test(self, role: str):
         self._apply_openlp()

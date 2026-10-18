@@ -32,6 +32,7 @@ def config_dir() -> Path:
 DEFAULTS = {
     "openlp": {"host": "127.0.0.1", "port": 4316, "username": "", "password": ""},
     "enable_on_launch": False,
+    "block_keys": True,  # macOS: keep the clicker's keys out of other apps
     "show_all_devices": False,
     # One section per platform so the same settings file can travel between machines.
     # Each section: {"device": <backend id>, "device_name": str, "mappings": {role: signature}}

@@ -1,16 +1,16 @@
-"""macOS backend: exclusive ("seized") open of the clicker's HID interfaces via hidapi.
+"""macOS backend: read the clicker's HID reports via hidapi, block its keys with an event tap.
 
-hidapi's Darwin backend opens devices with kIOHIDOptionsTypeSeizeDevice by default, which
-detaches the device from macOS's own keyboard handling: its buttons no longer reach any
-application until we close it again. Nothing else on the system is touched.
-
-macOS 10.15+ requires the *Input Monitoring* permission for the process that opens a
-keyboard-class device: Terminal/iTerm when run from a shell, Python.app when double
-clicked, or the .app bundle when packaged with PyInstaller/py2app.
+macOS only lets root seize (open exclusively) a keyboard-class device, so the clicker is
+opened shared: reading it needs the *Input Monitoring* permission. Its keystrokes would then
+still reach the front app, so when block_keys is on a CGEventTap (needs the *Accessibility*
+permission) drops every key event that arrives while the clicker is sending reports. An event
+tap cannot tell which keyboard a key came from, so the clicker's own HID reports decide.
 """
 from __future__ import annotations
 
+import ctypes
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 from .base import Backend, CaptureError, DeviceInfo
@@ -19,6 +19,25 @@ try:
     import hid  # package name on PyPI: hidapi
 except ImportError:  # pragma: no cover
     hid = None
+if hid is not None:
+    ctypes.CDLL(hid.__file__).hid_darwin_set_open_exclusive(0)  # seizing a keyboard needs root
+
+_cg = ctypes.CDLL("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+_cf = ctypes.CDLL("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+_TapCallback = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p, ctypes.c_void_p)
+_cg.CGEventTapCreate.restype = ctypes.c_void_p
+_cg.CGEventTapCreate.argtypes = [ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint64,
+                                 _TapCallback, ctypes.c_void_p]
+_cg.CGEventTapEnable.argtypes = [ctypes.c_void_p, ctypes.c_bool]
+_cf.CFMachPortCreateRunLoopSource.restype = ctypes.c_void_p
+_cf.CFMachPortCreateRunLoopSource.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_long]
+_cf.CFRunLoopGetCurrent.restype = ctypes.c_void_p
+_cf.CFRunLoopAddSource.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+_cf.CFRunLoopRunInMode.argtypes = [ctypes.c_void_p, ctypes.c_double, ctypes.c_bool]
+_cf.CFMachPortInvalidate.argtypes = [ctypes.c_void_p]
+_cf.CFRelease.argtypes = [ctypes.c_void_p]
+_DEFAULT_MODE = ctypes.c_void_p.in_dll(_cf, "kCFRunLoopDefaultMode")
+_KEY_EVENTS = (1 << 10) | (1 << 11) | (1 << 14)  # key down, key up, system-defined (media keys)
 
 KEYBOARD_USAGES = {(0x01, 0x06): "keyboard", (0x01, 0x07): "keypad", (0x0C, 0x01): "consumer control"}
 POINTER_USAGES = {(0x01, 0x01): "pointer", (0x01, 0x02): "mouse"}
@@ -52,6 +71,11 @@ class HidapiBackend(Backend):
         self._threads = []
         self._stop = threading.Event()
         self._on_event = None
+        self.block_keys = True
+        self._tap = None
+        self._tap_callback = _TapCallback(self._on_key)
+        self._clicker_down = False
+        self._last_report = 0.0
         # hid.enumerate() spins the calling thread's run loop; on the Tk thread that re-enters Tk
         # and aborts Python. So it always runs on this one thread (hidapi binds to its first caller).
         self._hid_thread = ThreadPoolExecutor(max_workers=1)
@@ -119,14 +143,27 @@ class HidapiBackend(Backend):
                 continue
             opened.append(handle)
         if not opened:
-            raise CaptureError("Could not open the clicker exclusively:\n" + "\n".join(errors)
+            raise CaptureError("Could not open the clicker:\n" + "\n".join(errors)
                                + "\n\n" + self.permission_hint())
         self._handles = opened
         for handle in opened:
             t = threading.Thread(target=self._reader, args=(handle,), name="hid-reader", daemon=True)
             t.start()
             self._threads.append(t)
-        on_event("status", f"Capturing {len(opened)} HID interface(s) of the clicker (exclusive).")
+        if self.block_keys:
+            # session tap, head insert, active filter
+            self._tap = _cg.CGEventTapCreate(1, 0, 0, _KEY_EVENTS, self._tap_callback, None)
+            if not self._tap:
+                self.stop()
+                raise CaptureError("To block the clicker's keys in other apps, macOS needs the Accessibility "
+                                   "permission for ClickerBridge (System Settings → Privacy & Security → "
+                                   "Accessibility). Grant it and turn the bridge on again, or untick "
+                                   "\"Block the clicker's keys\".")
+            t = threading.Thread(target=self._run_tap, name="key-tap", daemon=True)
+            t.start()
+            self._threads.append(t)
+        mode = "its keys are blocked in other apps" if self.block_keys else "shared: other apps get its keys too"
+        on_event("status", f"Capturing {len(opened)} HID interface(s) of the clicker ({mode}).")
         for err in errors:
             on_event("status", "Skipped an interface: " + err)
 
@@ -146,6 +183,8 @@ class HidapiBackend(Backend):
             if report == last:
                 continue  # some devices resend the current state periodically
             last = report
+            self._last_report = time.monotonic()
+            self._clicker_down = not _is_idle(report)
             if _is_idle(report):
                 if pressed is not None:
                     self._on_event("release", {"type": "report", "data": pressed})
@@ -155,6 +194,29 @@ class HidapiBackend(Backend):
                     self._on_event("release", {"type": "report", "data": pressed})
                 pressed = report
                 self._on_event("press", {"type": "report", "data": report})
+
+    def _run_tap(self) -> None:
+        source = _cf.CFMachPortCreateRunLoopSource(None, self._tap, 0)
+        _cf.CFRunLoopAddSource(_cf.CFRunLoopGetCurrent(), source, _DEFAULT_MODE)
+        while not self._stop.is_set():
+            _cf.CFRunLoopRunInMode(_DEFAULT_MODE, 0.25, False)
+        _cf.CFMachPortInvalidate(self._tap)
+        _cf.CFRelease(source)
+        _cf.CFRelease(self._tap)
+        self._tap = None
+
+    def _on_key(self, _proxy, event_type, event, _refcon):
+        if event_type >= 0xFFFFFFFE:  # macOS disabled the tap (timeout / user input): re-enable it
+            _cg.CGEventTapEnable(self._tap, True)
+            return event
+        # The key event can arrive a moment before the clicker's HID report, so wait briefly.
+        deadline = time.monotonic() + 0.05
+        while True:
+            if self._clicker_down or time.monotonic() - self._last_report < 0.2:
+                return None  # the clicker's key: swallow it
+            if time.monotonic() > deadline:
+                return event
+            time.sleep(0.002)
 
     def stop(self) -> None:
         self._stop.set()
