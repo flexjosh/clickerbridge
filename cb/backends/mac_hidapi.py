@@ -24,6 +24,7 @@ if hid is not None:
 
 _cg = ctypes.CDLL("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
 _cf = ctypes.CDLL("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+_iokit = ctypes.CDLL("/System/Library/Frameworks/IOKit.framework/IOKit")
 _TapCallback = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p, ctypes.c_void_p)
 _cg.CGEventTapCreate.restype = ctypes.c_void_p
 _cg.CGEventTapCreate.argtypes = [ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint64,
@@ -76,6 +77,10 @@ class HidapiBackend(Backend):
         self._tap_callback = _TapCallback(self._on_key)
         self._clicker_down = False
         self._last_report = 0.0
+        # Ask for Input Monitoring and Accessibility up front: on first launch macOS prompts and
+        # lists the app under Privacy & Security; once answered these calls do nothing visible.
+        _iokit.IOHIDRequestAccess(1)  # kIOHIDRequestTypeListenEvent
+        _cg.CGRequestPostEventAccess()
         # hid.enumerate() spins the calling thread's run loop; on the Tk thread that re-enters Tk
         # and aborts Python. So it always runs on this one thread (hidapi binds to its first caller).
         self._hid_thread = ThreadPoolExecutor(max_workers=1)
